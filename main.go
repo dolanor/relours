@@ -1,76 +1,112 @@
-// Declare this file to be part of the main package so it can be compiled into
-// an executable.
 package main
 
-// Import all Go packages required for this file.
 import (
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
+	"github.com/bwmarrin/dgvoice"
 	"github.com/bwmarrin/discordgo"
 )
 
-// Version is a constant that stores the Disgord version information.
-const Version = "v0.0.0-alpha"
+type config struct {
+	token          string
+	guildID        string
+	voiceChannelID string
+}
 
-// Session is declared in the global space so it can be easily used
-// throughout this program.
-// In this use case, there is no error that would be returned.
-var Session, _ = discordgo.New()
+type bot struct {
+	session *discordgo.Session
+	voice   *discordgo.VoiceConnection
+}
 
-// Read in all configuration options from both environment variables and
-// command line arguments.
-func init() {
-
-	// Discord Authentication Token
-	Session.Token = os.Getenv("DG_TOKEN")
-	if Session.Token == "" {
-		flag.StringVar(&Session.Token, "t", "", "Discord Authentication Token")
-	}
+func loadConfig() config {
+	var cfg config
+	flag.StringVar(&cfg.token, "t", "", "Bot Token")
+	flag.StringVar(&cfg.guildID, "g", "", "guild ID")
+	flag.StringVar(&cfg.voiceChannelID, "c", "", "voice channel ID")
+	flag.Parse()
+	return cfg
 }
 
 func main() {
 
-	// Declare any variables needed later.
-	var err error
+	cfg := loadConfig()
+	// Create a new Discord session using the provided bot token.
+	dg, err := discordgo.New("Bot " + cfg.token)
+	if err != nil {
+		log.Println("error creating Discord session,", err)
+		return
+	}
+	defer dg.Close()
 
-	// Print out a fancy logo!
-	fmt.Printf(` 
-	________  .__                               .___
-	\______ \ |__| ______ ____   ___________  __| _/
-	||    |  \|  |/  ___// ___\ /  _ \_  __ \/ __ | 
-	||    '   \  |\___ \/ /_/  >  <_> )  | \/ /_/ | 
-	||______  /__/____  >___  / \____/|__|  \____ | 
-	\_______\/        \/_____/   %-16s\/`+"\n\n", Version)
+	// Register the messageCreate func as a callback for MessageCreate events.
+	dg.AddHandler(messageCreate)
 
-	// Parse command line arguments
-	flag.Parse()
+	// In this example, we only care about receiving message events.
+	dg.Identify.Intents = discordgo.IntentsGuildMessages
 
-	// Verify a Token was provided
-	if Session.Token == "" {
-		log.Println("You must provide a Discord authentication token.")
+	// Open a websocket connection to Discord and begin listening.
+	err = dg.Open()
+	if err != nil {
+		log.Println("error opening connection,", err)
 		return
 	}
 
-	// Open a websocket connection to Discord
-	err = Session.Open()
+	dgv, err := dg.ChannelVoiceJoin(cfg.guildID, cfg.voiceChannelID, false, true)
 	if err != nil {
-		log.Printf("error opening connection to Discord, %s\n", err)
-		os.Exit(1)
+		if err, ok := dg.VoiceConnections[cfg.guildID]; ok {
+			dgv = dg.VoiceConnections[cfg.guildID]
+			if err != nil {
+				log.Println("error connecting:", err)
+				return
+			}
+		} else {
+			log.Println("error connecting:", err)
+			return
+		}
 	}
 
-	// Wait for a CTRL-C
-	log.Printf(`Now running. Press CTRL-C to exit.`)
+	defer dgv.Close()
+
+	// Wait here until CTRL-C or other term signal is received.
+	fmt.Println("Bot is now running.  Press CTRL-C to exit.")
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
 	<-sc
 
-	// Clean up
-	Session.Close()
+	// Cleanly close down the Discord session.
+}
 
-	// Exit Normally.
+// This function will be called (due to AddHandler above) every time a new
+// message is created on any channel that the authenticated bot has access to.
+func messageCreate(b *bot) func(s *discordgo.Session, m *discordgo.MessageCreate) {
+	return func(s *discordgo.Session, m *discordgo.MessageCreate) {
+		// Ignore all messages created by the bot itself
+		// This isn't required in this specific example but it's a good practice.
+		if m.Author.ID == s.State.User.ID {
+			return
+		}
+
+		switch m.Author.Username {
+		case "dolanor":
+			_, err := s.ChannelMessageSend(m.ChannelID, "C'est pas faux.")
+			if err != nil {
+				log.Println("err:", err)
+			}
+			fallthrough
+		default:
+			_, err := s.ChannelMessageSend(m.ChannelID, "EN FAIT "+strings.ToUpper(m.Content))
+			if err != nil {
+				log.Println("err:", err)
+			}
+
+			dgvoice.PlayAudioFile(b.voice, "file.ogg", make(chan bool))
+
+		}
+	}
 }
