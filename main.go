@@ -11,6 +11,7 @@ import (
 
 	"github.com/bwmarrin/dgvoice"
 	"github.com/bwmarrin/discordgo"
+	htgotts "github.com/hegedustibor/htgo-tts"
 )
 
 type config struct {
@@ -109,4 +110,10 @@ func messageCreate(b *bot) func(s *discordgo.Session, m *discordgo.MessageCreate
 
 		}
 	}
+
+func Speak() {
+	speech := htgotts.Speech{Folder: "audio", Language: "fr"}
+	// TODO the: need to get the audio bytes
+	speech.Speak("mange ta merde mange ta merde mange ta merde mange ta merde mange ta merde mange ta merde mange ta merde mange ta merde mange ta merde mange ta merde mange ta merde mange ta merde ")
+
 }
